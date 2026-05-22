@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise Multi-Deck Game Framework</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        if (typeof io === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"><\/script>');
+        }
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-screen transition-all duration-300 select-none overflow-x-hidden relative" 
+      :class="state.preferences ? [state.preferences.bg_color, state.preferences.text_color || 'text-slate-800'] : 'bg-stone-100 text-slate-800'" 
+      x-data="arenaEngine()">
+
+    <template x-if="errorMessage">
+        <div class="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-xl w-full px-4 animate-fade-in">
+            <div class="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 shadow-xl flex items-center justify-between gap-4 text-slate-900">
+                <div class="flex items-center space-x-3">
+                    <span class="text-xl">⚠️</span>
+                    <div class="text-left">
+                        <div class="text-xs font-mono font-bold tracking-widest text-amber-800 uppercase">📢 GAME RULE INFRACTION VALIDATION</div>
+                        <p class="text-sm font-extrabold mt-0.5" x-text="errorMessage"></p>
+                    </div>
+                </div>
+                <button @click="errorMessage = null" class="bg-amber-100 hover:bg-amber-200 text-amber-800 font-mono font-bold text-xs px-2.5 py-1 rounded transition shrink-0">
+                    Dismiss
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <template x-if="state.status === 'ENDED' && state.last_show_declaration">
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-all duration-500 animate-fade-in">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-white/10 overflow-hidden transform scale-100 transition-all p-6 text-center text-slate-900 relative">
+                
+                <button @click="state.last_show_declaration = null" class="absolute top-4 right-4 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-full p-1.5 transition">
+                    <span class="text-xs font-mono font-bold px-1">✕ Close Banner</span>
+                </button>
+
+                <div class="mb-4 inline-block px-4 py-1 rounded-full text-xs font-mono font-bold uppercase tracking-widest"
+                     :class="isDeclaringPlayerWinner() ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'">
+                    📢 SHOW DECLARED & TERMINATED
+                </div>
+
+                <h2 class="text-3xl font-black tracking-tight mb-2">
+                    <span class="text-indigo-600" x-text="state.last_show_declaration.username"></span> 
+                    has declared a Show!
+                </h2>
+
+                <div class="my-4 p-4 rounded-xl border font-mono inline-flex items-center space-x-3 text-lg font-extrabold"
+                     :class="isDeclaringPlayerWinner() ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'">
+                    <span x-text="isDeclaringPlayerWinner() ? '🏆 VERDICT: VALID SHOW (WINNER)' : '❌ VERDICT: INVALID SHOW / DEFEAT (LOSER)'"></span>
+                </div>
+
+                <div class="mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <h3 class="text-xs font-mono uppercase tracking-widest text-slate-500 font-bold mb-3">
+                        Remaining hand displayed as dropped cards:
+                    </h3>
+                    
+                    <div class="flex flex-wrap gap-2 justify-center py-2 min-h-[110px]">
+                        <template x-for="(card, idx) in state.last_show_declaration.final_hand_dropped || []" :key="idx">
+                            <div class="w-16 h-24 bg-white rounded-xl p-2 flex flex-col justify-between shadow border-2 border-slate-200">
+                                <div class="flex justify-between items-center text-xs font-bold leading-none">
+                                    <span :class="getCardColor(card)" x-text="card.value"></span>
+                                    <span class="text-[7px] bg-amber-100 text-amber-800 px-0.5 rounded" x-show="card.is_joker || isActingJokerValue(card)">JOKER</span>
+                                </div>
+                                <span class="text-xl text-center block" :class="getCardColor(card)" x-text="getSuitIcon(card)"></span>
+                                <span class="text-xs font-bold block text-right rotate-180 leading-none" :class="getCardColor(card)" x-text="card.value"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <p class="text-xs text-slate-400 font-mono mt-4">Awaiting administrative reset or the next hand iteration deal sequence.</p>
+            </div>
+        </div>
+    </template>
+
+    <header class="p-4 flex justify-between items-center shadow-md border-b border-black/5" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+        <div class="flex items-center space-x-3">
+            <div class="relative group">
+                <img :src="getMyPhoto()" class="w-11 h-11 rounded-full border-2 object-cover transition-all duration-200" :class="state.preferences ? state.preferences.accent_color : 'border-emerald-600'">
+                <label class="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center text-[9px] text-white opacity-0 group-hover:opacity-100 cursor-pointer transition">
+                    Upload
+                    <input type="file" accept="image/*" class="hidden" @change="uploadProfilePhoto($event, username)">
+                </label>
+            </div>
+            <div>
+                <h1 class="text-md font-extrabold tracking-tight" :class="state.preferences ? state.preferences.text_color : 'text-slate-800'">
+                    {{ username }} <span class="text-xs font-mono opacity-70">({{ role }})</span>
+                </h1>
+                <p class="text-[10px] text-slate-400 font-mono">Click picture to change profile photo</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2 text-xs">
+            <button @click="viewMode = 'user'" class="px-3 py-1.5 rounded font-bold transition" :class="viewMode === 'user' ? 'bg-emerald-600 text-white shadow' : 'bg-black/5 hover:bg-black/10'">User Arena View</button>
+            <button @click="viewMode = 'stats'" class="px-3 py-1.5 rounded font-bold transition" :class="viewMode === 'stats' ? 'bg-emerald-600 text-white shadow' : 'bg-black/5 hover:bg-black/10'">Stats View</button>
+            <template x-if="'{{ role }}' === 'admin'">
+                <button @click="viewMode = 'admin'" class="px-3 py-1.5 rounded font-bold transition" :class="viewMode === 'admin' ? 'bg-emerald-600 text-white shadow' : 'bg-black/5 hover:bg-black/10'">Admin Panel Config</button>
+            </template>
+            <a href="/logout" class="bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded font-bold transition shadow-sm">Logout</a>
+        </div>
+    </header>
+
+    <main class="p-4 grid grid-cols-1 lg:grid-cols-4 gap-4 h-[calc(100vh-85px)]">
+        
+        <section x-show="viewMode === 'user'" class="lg:col-span-3 flex flex-col justify-between rounded-xl p-4 border border-black/5 relative bg-black/[0.02] space-y-4">
+            
+            <div class="w-full flex justify-between items-center p-3 rounded-lg border border-black/5" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+                <div class="flex items-center space-x-3">
+                    <span class="text-xs font-mono tracking-wider">GAME STATE: 
+                        <span class="px-2 py-0.5 rounded text-[11px] font-bold" 
+                              :class="state.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'" 
+                              x-text="state.status"></span>
+                    </span>
+                </div>
+                
+                <div class="flex items-center space-x-3">
+                    <div class="flex items-center space-x-2" x-show="state.status !== 'ACTIVE'">
+                        <button @click="triggerShuffle()" 
+                                :disabled="shuffling"
+                                class="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white font-bold text-xs px-3 py-1.5 rounded shadow-sm transition flex items-center space-x-1.5">
+                            <span :class="shuffling ? 'animate-spin inline-block' : ''">🔄</span>
+                            <span x-text="shuffling ? 'Shuffle Deck' : 'Shuffle Deck'"></span>
+                        </button>
+
+                        <template x-if="'{{ role }}' === 'admin'">
+                            <button @click="socket.emit('admin_start_game')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-4 py-1.5 rounded shadow-sm transition transform hover:scale-102">Start Match</button>
+                        </template>
+                    </div>
+
+                    <template x-if="state.current_turn && state.status === 'ACTIVE'">
+                        <div class="flex items-center space-x-2 bg-black/[0.03] px-4 py-1 rounded-full border border-black/5 shadow-inner">
+                            <span class="text-xs opacity-70">Playing Turn:</span>
+                            <span class="font-extrabold text-emerald-700 text-sm animate-pulse" x-text="state.current_turn"></span>
+                        </div>
+                    </template>
+                    <template x-if="state.status === 'ENDED'">
+                        <div class="bg-amber-100 border border-amber-200 px-4 py-1 rounded-full text-xs text-amber-800 font-mono flex items-center space-x-2">
+                            <span>Round complete. Awaiting deck shuffle or new deal setup.</span>
+                            <button @click="state.last_show_declaration = state.historical_show_declaration_backup || state.last_show_declaration" class="underline font-bold text-indigo-900 ml-2">Re-open Show Banner</button>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <div class="flex flex-col space-y-4 my-2">
+                <div class="flex flex-wrap justify-center items-center space-x-8 lg:space-x-12">
+                    <div class="text-center">
+                        <p class="text-[10px] uppercase font-mono tracking-widest mb-1 opacity-60">Undealt Deck</p>
+                        <div :class="isMyTurn() && !selectedPickCard ? 'ring-4 ring-emerald-500/30' : ''"
+                             class="w-20 h-30 lg:w-24 lg:h-36 bg-gradient-to-br from-slate-700 to-slate-900 rounded-xl border-2 border-white shadow-lg flex items-center justify-center relative select-none">
+                            <span class="text-xl lg:text-2xl font-mono text-white font-bold" x-text="state.deck_count"></span>
+                            <div x-show="isMyTurn() && !selectedPickCard" class="absolute -top-2 -right-2 bg-emerald-600 text-white rounded-full p-0.5 text-[8px] font-black px-1.5 shadow">DEFAULT PICK</div>
+                            <div x-show="shuffling" class="absolute inset-0 bg-indigo-500/30 animate-pulse rounded-xl"></div>
+                        </div>
+                    </div>
+
+                    <template x-if="state.acting_joker">
+                        <div class="text-center">
+                            <p class="text-[10px] uppercase font-mono tracking-widest mb-1 text-emerald-700 font-bold">Acting Joker</p>
+                            <div class="w-20 h-30 lg:w-24 lg:h-36 bg-white rounded-xl p-2 flex flex-col justify-between shadow-lg border-2" :class="state.preferences ? state.preferences.accent_color : 'border-emerald-600'">
+                                <span class="text-xs lg:text-sm font-bold block text-left" :class="getCardColor(state.acting_joker)" x-text="state.acting_joker.value"></span>
+                                <span class="text-2xl lg:text-3xl text-center block" :class="getCardColor(state.acting_joker)" x-text="getSuitIcon(state.acting_joker)"></span>
+                                <span class="text-xs lg:text-sm font-bold block text-right rotate-180" :class="getCardColor(state.acting_joker)" x-text="state.acting_joker.value"></span>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div class="grid grid-cols-1 gap-4 my-4">
+                        <div class="p-4 rounded-xl border text-center flex flex-col items-center justify-center min-h-[120px] relative bg-white"
+                             :class="selectedDiscardCardRaw ? 'border-amber-500 ring-2 ring-amber-400/30' : 'border-slate-200'">
+                            
+                            <div class="text-sm font-bold uppercase tracking-wide mb-2">Last Move</div>
+                            <div class="flex items-center justify-center gap-1.5 flex-wrap w-full">
+                                
+                                <template x-if="state.last_turn_dropped_cards && state.last_turn_dropped_cards.length > 0">
+                                    <template x-for="(card, index) in state.last_turn_dropped_cards" :key="index">
+                                        <button @click="if(state.current_turn === username) { togglePickDiscardSelection(); }"
+                                                class="w-20 h-24 border rounded-lg shadow-sm flex flex-col items-center justify-between p-1 bg-white font-mono text-xs transition-transform duration-150 transform hover:scale-105 active:scale-95 cursor-pointer"
+                                                :class="[(card.suit === 'H' || card.suit === 'D') ? 'text-rose-600 border-rose-200' : 'text-slate-900 border-slate-300',
+                                                         (selectedDiscardCardRaw && selectedDiscardCardRaw.value === card.value && selectedDiscardCardRaw.suit === card.suit) ? 'ring-2 ring-amber-500 border-amber-500 scale-105' : '']">
+                                            <span class="font-bold text-[10px]" x-text="card.value"></span>
+                                            <span class="text-sm" x-text="card.is_joker ? '🃏' : (card.suit === 'H' ? '♥' : card.suit === 'D' ? '♦' : card.suit === 'C' ? '♣' : '♠')"></span>
+                                            <span class="text-[9px] opacity-40 self-end" x-text="card.value"></span>
+                                        </button>
+                                    </template>
+                                </template>
+                    
+                                <template x-if="(!state.last_turn_dropped_cards || state.last_turn_dropped_cards.length === 0) && state.discard_pile && state.discard_pile.length > 0">
+                                    <div x-data="{ topCard: state.discard_pile[state.discard_pile.length - 1] }">
+                                        <button @click="if(state.current_turn === username) { togglePickDiscardSelection(); }"
+                                                class="w-11 h-16 border rounded-lg shadow-sm flex flex-col items-center justify-between p-1 bg-white font-mono text-xs transition-transform duration-150 transform hover:scale-105 active:scale-95 cursor-pointer"
+                                                :class="[(topCard.suit === 'H' || topCard.suit === 'D') ? 'text-rose-600 border-rose-200' : 'text-slate-900 border-slate-300',
+                                                         (selectedDiscardCardRaw && selectedDiscardCardRaw.value === topCard.value && selectedDiscardCardRaw.suit === topCard.suit) ? 'ring-2 ring-amber-500 border-amber-500 scale-105' : '']">
+                                            <span class="font-bold text-[10px]" x-text="topCard.value"></span>
+                                            <span class="text-sm" x-text="topCard.is_joker ? '🃏' : (topCard.suit === 'H' ? '♥' : topCard.suit === 'D' ? '♦' : topCard.suit === 'C' ? '♣' : '♠')"></span>
+                                            <span class="text-[9px] opacity-40 self-end" x-text="topCard.value"></span>
+                                        </button>
+                                    </div>
+                                </template>
+                    
+                                <template x-if="(!state.last_turn_dropped_cards || state.last_turn_dropped_cards.length === 0) && (!state.discard_pile || state.discard_pile.length === 0)">
+                                    <div class="text-xs text-slate-400 font-mono italic my-2">Pile is empty</div>
+                                </template>
+                                
+                            </div>
+                    
+                            <template x-if="selectedDiscardCardRaw">
+                                <button @click.stop="selectedDiscardCardRaw = null; selectedPickCard = null;" class="absolute top-1 right-1 text-slate-400 hover:text-rose-500 text-[10px] font-mono bg-slate-100 px-1 rounded">
+                                    ✕ Reset
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 rounded-xl border border-black/5 shadow-sm" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="text-xs font-mono uppercase tracking-widest opacity-60">Cards In Hand</span>
+                    
+                    <div class="space-x-2 flex items-center" x-data="{ showConfirmMode: false }" x-show="isMyTurn()">
+                        <template x-if="!showConfirmMode">
+                            <div class="space-x-2">
+                                <button @click="discardSelection()" 
+                                        :disabled="selectedCards.length === 0"
+                                        class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 font-bold text-white text-xs px-4 py-1.5 rounded transition shadow-sm">
+                                    Play Turn
+                                </button>
+                                <button @click="showConfirmMode = true" class="bg-amber-500 hover:bg-amber-400 font-extrabold text-slate-900 text-xs px-4 py-1.5 rounded transition shadow-sm">Show</button>
+                            </div>
+                        </template>
+
+                        <template x-if="showConfirmMode">
+                            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-4 shadow animate-fade-in text-slate-900 max-w-md">
+                                <div class="text-left">
+                                    <div class="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-800">📢 CONFIRM SHOWDOWN?</div>
+                                    <p class="text-[11px] font-medium leading-tight mt-0.5">You are going to test your wits.</p>
+                                </div>
+                                <div class="flex space-x-1 shrink-0">
+                                    <button @click="showConfirmMode = false" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold px-2 py-1 rounded transition">Cancel</button>
+                                    <button @click="const fullHandPayload = [...state.your_hand]; socket.emit('declare_show', { username: username, final_hand_dropped: fullHandPayload }); showConfirmMode = false;" class="bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold px-2.5 py-1 rounded transition">Yes, Showdown!!</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-2 justify-center py-2 min-h-[130px]">
+                    <template x-for="(card, idx) in state.your_hand" :key="idx">
+                        <div @click="toggleCardSelection(idx)"
+                             class="w-20 h-30 lg:w-24 lg:h-36 bg-white rounded-xl p-2 flex flex-col justify-between shadow-md cursor-pointer transform transition border-4 relative"
+                             :class="selectedCards.includes(idx) ? 'border-amber-400 -translate-y-4 shadow-lg shadow-amber-400/20' : 'border-transparent'">
+                            <div class="flex justify-between items-center">
+                                <span class="text-xs lg:text-sm font-bold" :class="getCardColor(card)" x-text="card.value"></span>
+                                <span class="text-[9px] bg-amber-100 text-amber-800 px-0.5 rounded font-bold" x-show="card.is_joker || isActingJokerValue(card)">JOKER</span>
+                            </div>
+                            <span class="text-2xl lg:text-3xl text-center" :class="getCardColor(card)" x-text="getSuitIcon(card)"></span>
+                            <span class="text-xs lg:text-sm font-bold block text-right rotate-180" :class="getCardColor(card)" x-text="card.value"></span>
+                        </div>
+                    </template>
+                    <template x-if="!state.your_hand || state.your_hand.length === 0">
+                        <p class="text-slate-400 text-xs italic self-center">No active cards held. Waiting for round start deal.</p>
+                    </template>
+                </div>
+            </div>
+
+            <div class="p-4 rounded-xl shadow-sm flex flex-col h-40 overflow-hidden" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+                <h3 class="text-xs font-mono tracking-widest uppercase font-black text-emerald-700 border-b border-black/5 pb-1 mb-2">📋 Move History</h3>
+                <div class="flex-1 overflow-y-auto text-[11px] font-mono space-y-1.5 pr-1">
+                    <template x-for="log in getReversedHistory()" :key="log.time + log.message">
+                        <div class="p-1.5 rounded bg-black/[0.02] border-l-4 border-emerald-600 pl-2 text-slate-700">
+                            <span class="text-[9px] opacity-40 inline-block mr-2" x-text="log.time || 'System'"></span>
+                            <span class="font-medium" x-html="log.message"></span>
+                        </div>
+                    </template>
+                    <template x-if="!state.history || state.history.length === 0">
+                        <p class="text-slate-400 italic text-center pt-2">No logged operations inside current execution stack.</p>
+                    </template>
+                </div>
+            </div>
+        </section>
+
+        <section x-show="viewMode === 'stats'" class="lg:col-span-3 flex flex-col space-y-4">
+            <div class="p-4 rounded-xl shadow-sm border border-black/5" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+                <h2 class="text-lg font-extrabold tracking-tight mb-3">Table Leaderboard Scores</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs font-mono border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-200 bg-slate-50 opacity-70">
+                                <th class="p-2">Player</th>
+                                <th class="p-2">Total Score</th>
+                                <th class="p-2">Match Wins</th>
+                                <th class="p-2">Match Losses</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="p in state.players || []" :key="p">
+                                <tr class="border-b border-slate-100 hover:bg-slate-50/50">
+                                    <td class="p-2 font-bold flex items-center space-x-2">
+                                        <img :src="state.user_photos ? (state.user_photos[p] || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80') : ''" class="w-6 h-6 rounded-full object-cover border">
+                                        <span x-text="p"></span>
+                                        <span class="text-[9px] bg-indigo-100 text-indigo-800 px-1 rounded ml-1" x-show="p === username">YOU</span>
+                                    </td>
+                                    <td class="p-2 font-black text-rose-600" x-text="state.scores ? (state.scores[p] || 0) : 0"></td>
+                                    <td class="p-2 text-emerald-600 font-bold" x-text="state.wins ? (state.wins[p] || 0) : 0"></td>
+                                    <td class="p-2 text-slate-400" x-text="state.losses ? (state.losses[p] || 0) : 0"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <template x-if="'{{ role }}' === 'admin'">
+            <section x-show="viewMode === 'admin'" class="lg:col-span-3 space-y-4">
+                <div class="p-4 rounded-xl shadow-sm border border-black/5" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+                    <h2 class="text-md font-black tracking-wider uppercase text-indigo-600 mb-3">🛠️ Global Control Matrix Overrides</h2>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="p-3 bg-black/[0.01] border rounded-xl space-y-2">
+                            <h3 class="text-xs font-bold font-mono text-slate-500 uppercase">Match Mechanics</h3>
+                            <div class="flex flex-wrap gap-2">
+                                <button @click="socket.emit('admin_force_end')" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-3 py-1.5 rounded shadow transition">Terminate Round Cycle</button>
+                                <button @click="socket.emit('admin_clear_history')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs px-3 py-1.5 rounded shadow transition">Flush Logs</button>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-black/[0.01] border rounded-xl space-y-2">
+                            <h3 class="text-xs font-bold font-mono text-slate-500 uppercase">Interactive Grid UI Layout Skins</h3>
+                            <div class="grid grid-cols-2 gap-1.5 text-[11px]">
+                                <button @click="socket.emit('admin_update_prefs', {bg_color: 'bg-stone-100', panel_color: 'bg-white', text_color: 'text-slate-800', accent_color: 'border-emerald-600'})" class="p-1 bg-stone-200 rounded border text-center font-bold">Default Sand</button>
+                                <button @click="socket.emit('admin_update_prefs', {bg_color: 'bg-slate-900', panel_color: 'bg-slate-800', text_color: 'text-white', accent_color: 'border-indigo-500'})" class="p-1 bg-slate-800 text-white rounded border text-center font-bold">Cyber Slate Dark</button>
+                                <button @click="socket.emit('admin_update_prefs', {bg_color: 'bg-slate-950', panel_color: 'bg-slate-900', text_color: 'text-slate-100', accent_color: 'border-rose-600'})" class="p-1 bg-blue-900 text-rose-500 rounded border border-blue-800 text-center font-bold">Cyber Showdown</button>
+        			<button @click="socket.emit('admin_update_prefs', {bg_color: 'bg-stone-50', panel_color: 'bg-white', text_color: 'text-slate-800', accent_color: 'border-blue-700'})" class="p-1 bg-white text-blue-700 rounded border border-red-200 text-center font-bold">Majestic Imperial</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
+                        <h3 class="text-xs font-bold font-mono text-indigo-900 uppercase">Administrative Artificial Player Injection</h3>
+                        <div class="flex gap-2 max-w-sm">
+                            <input type="text" id="target_user_input" placeholder="Bot Handle Username..." class="bg-white p-2 border rounded-lg font-mono text-xs focus:outline-none flex-1">
+                            <button @click="const val = document.getElementById('target_user_input').value.trim(); if(val){ socket.emit('admin_manage_user', {action: 'create', target_user: val}); document.getElementById('target_user_input').value=''; }" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2 rounded-lg transition shadow">Deploy User</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </template>
+
+        <section class="lg:col-span-1 flex flex-col justify-between rounded-xl p-4 border border-black/5" :class="state.preferences ? state.preferences.panel_color : 'bg-white'">
+            <div class="space-y-4 flex-1 flex flex-col min-h-0">
+                <div>
+                    <h2 class="text-sm font-black font-mono tracking-widest text-slate-400 uppercase">📡 Synchronization Grid</h2>
+                    <p class="text-[10px] text-slate-400 font-mono mt-0.5" x-text="'Active players: ' + (state.players ? state.players.length : 0)"></p>
+                </div>
+
+                <div class="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-none max-h-[300px] lg:max-h-none">
+                    <template x-for="p in state.players || []" :key="p">
+                        <div class="p-2.5 rounded-xl border border-black/5 bg-black/[0.01] flex items-center justify-between transition hover:border-black/10">
+                            <div class="flex items-center space-x-2.5 min-w-0">
+                                <div class="relative">
+                                    <img :src="state.user_photos ? (state.user_photos[p] || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80') : ''" class="w-8 h-8 rounded-full object-cover border">
+                                    <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white"></div>
+                                </div>
+                                <div class="min-w-0">
+                                    <div class="text-lg font-bold truncate flex items-center">
+                                        <span x-text="p"></span>
+                                        <template x-if="state.current_turn === p && state.status === 'ACTIVE'">
+                                            <span class="ml-1.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
+                                        </template>
+                                    </div>
+                                    <div class="text-lg font-mono opacity-50 truncate">Score: <span class="font-bold text-rose-600" x-text="state.scores ? (state.scores[p] || 0) : 0"></span></div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center space-x-1">
+                                <template x-if="'{{ role }}' === 'admin' && p !== username">
+                                    <button @click="socket.emit('admin_manage_user', {action: 'promote', target_user: p})" class="bg-black/5 hover:bg-black/10 p-1 rounded font-mono text-[9px] font-black text-slate-600 transition">PROMOTE</button>
+                                </template>
+                                <span class="text-xs" x-text="state.custom_emotions ? (state.custom_emotions[p] || '😐') : '😐'"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <div class="border-t border-black/5 pt-3 mt-4 space-y-3" x-data="{ customLabel: '', customUrl: '', directUrl: '' }">
+                <div class="text-[10px] font-mono tracking-wider opacity-60 uppercase font-bold">🎭 Reactions Matrix</div>
+                
+                <div class="grid grid-cols-5 gap-1 text-center">
+                    <template x-for="emo in ['🔥', '👾', '👑', '🃏', '🤡']" :key="emo">
+                        <button @click="socket.emit('admin_update_prefs', {custom_emotions: {[username]: emo}})" x-text="emo" class="p-1.5 bg-black/[0.02] hover:bg-black/5 border border-black/5 rounded-lg text-sm transition active:scale-90"></button>
+                    </template>
+                </div>
+            
+                <div class="space-y-1">
+                    <label class="text-[9px] font-mono opacity-50 block">Play YouTube Link to Room:</label>
+                    <div class="flex gap-1">
+                        <input type="text" x-model="directUrl" placeholder="https://www.youtube.com/watch?v=..." class="bg-white p-1.5 border rounded-lg font-mono text-[10px] focus:outline-none flex-1 text-slate-800">
+                        <button @click="if(directUrl.trim()){ socket.emit('broadcast_youtube', { url: directUrl.trim() }); directUrl=''; }" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] px-2.5 py-1 rounded-lg transition">Play</button>
+                    </div>
+                </div>
+            
+                <div class="space-y-1 border-t border-black/5 pt-2">
+                    <label class="text-[9px] font-mono opacity-50 block">Save Custom Video Reaction:</label>
+                    <div class="grid grid-cols-2 gap-1">
+                        <input type="text" x-model="customLabel" placeholder="Button Name (e.g., Win)" class="bg-white p-1.5 border rounded-lg font-mono text-[10px] focus:outline-none text-slate-800">
+                        <input type="text" x-model="customUrl" placeholder="YouTube Link..." class="bg-white p-1.5 border rounded-lg font-mono text-[10px] focus:outline-none text-slate-800">
+                    </div>
+                    <button @click="if(customLabel.trim() && customUrl.trim()){ socket.emit('save_custom_video_reaction', { username: username, label: customLabel.trim(), url: customUrl.trim() }); customLabel=''; customUrl=''; }" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold text-[10px] py-1 rounded-lg transition mt-1">
+                        + Add to Custom Grid
+                    </button>
+                </div>
+            
+                <div class="grid grid-cols-2 gap-1 pt-1 max-h-[80px] overflow-y-auto">
+                    <template x-for="(url, label) in (state.custom_video_reactions ? (state.custom_video_reactions[username] || {}) : {})" :key="label">
+                        <button @click="socket.emit('broadcast_youtube', { url: url })" 
+                                class="p-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-[10px] font-mono truncate text-amber-900 font-bold text-left px-2 flex items-center justify-between">
+                            <span class="truncate" x-text="'📺 ' + label"></span>
+                            <span class="text-[8px] opacity-40">▶</span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+            
+            <div x-data="{ 
+                activeEmbed: null, 
+                showPlayer: false,
+                extractVideoId(url) {
+                    if (!url) return null;
+                    let regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+                    let match = url.match(regExp);
+                    return (match && match[2].length == 11) ? match[2] : null;
+                }
+            }"
+            x-init="
+                socket.on('play_video_broadcast', (data) => {
+                    let vId = extractVideoId(data.url);
+                    if(vId) {
+                        activeEmbed = 'https://www.youtube.com/embed/' + vId + '?autoplay=1&controls=1';
+                        showPlayer = true;
+                    }
+                });
+            "
+            x-show="showPlayer"
+            class="fixed bottom-4 left-4 z-50 bg-slate-950 p-2 rounded-xl shadow-2xl border border-slate-800 w-72 h-44 animate-fade-in flex flex-col justify-between"
+            style="display: none;">
+                <div class="flex justify-between items-center pb-1 border-b border-slate-800">
+                    <span class="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">📢 Reaction Broadcast Link</span>
+                    <button @click="showPlayer = false; activeEmbed = null;" class="text-slate-500 hover:text-rose-400 font-mono text-xs font-bold px-1.5 bg-slate-900 rounded">✕ Close</button>
+                </div>
+                <div class="flex-1 bg-black rounded overflow-hidden mt-1 relative">
+                    <template x-if="activeEmbed">
+                        <iframe class="w-full h-full" :src="activeEmbed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                    </template>
+                </div>
+            </div>
+            
+            <div x-data="{ 
+                activeEmbed: null, 
+                showPlayer: false,
+                extractVideoId(url) {
+                    if (!url) return null;
+                    let regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+                    let match = url.match(regExp);
+                    return (match && match[2].length == 11) ? match[2] : null;
+                }
+            }"
+            x-init="
+                socket.on('play_video_broadcast', (data) => {
+                    let vId = extractVideoId(data.url);
+                    if(vId) {
+                        activeEmbed = 'https://www.youtube.com/embed/' + vId + '?autoplay=1&controls=1';
+                        showPlayer = true;
+                    }
+                });
+            "
+            x-show="showPlayer"
+            class="fixed bottom-4 left-4 z-50 bg-slate-950 p-2 rounded-xl shadow-2xl border border-slate-800 w-72 h-44 animate-fade-in flex flex-col justify-between"
+            style="display: none;">
+                <div class="flex justify-between items-center pb-1 border-b border-slate-800">
+                    <span class="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">📢 Reaction Broadcast Link</span>
+                    <button @click="showPlayer = false; activeEmbed = null;" class="text-slate-500 hover:text-rose-400 font-mono text-xs font-bold px-1.5 bg-slate-900 rounded">✕ Close</button>
+                </div>
+                <div class="flex-1 bg-black rounded overflow-hidden mt-1 relative">
+                    <template x-if="activeEmbed">
+                        <iframe class="w-full h-full" :src="activeEmbed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                    </template>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        function arenaEngine() {
+            return {
+                username: '{{ username }}',
+                role: '{{ role }}',
+                viewMode: 'user',
+                socket: null,
+                state: {
+                    status: 'LOBBY',
+                    players: [],
+                    scores: {},
+                    wins: {},
+                    losses: {},
+                    discard_pile: [],
+                    your_hand: [],
+                    history: [],
+                    deck_count: 0,
+                    acting_joker: null,
+                    current_turn: null,
+                    drawn_this_turn: false,
+                    preferences: null,
+                    user_photos: {},
+                    custom_emotions: {},
+                    last_turn_dropped_cards: [],
+                    last_show_declaration: null
+                },
+                selectedCards: [],
+                selectedDiscardCardRaw: null,
+                selectedPickCard: null,
+                errorMessage: null,
+                shuffling: false,
+
+                init() {
+                    this.socket = io();
+                    
+                    this.socket.on('connect', () => {
+                        this.socket.emit('join_game', { username: this.username });
+                    });
+
+                    this.socket.on('state_update', (newState) => {
+                        if (this.state.status !== 'ENDED' && newState.status === 'ENDED' && newState.last_show_declaration) {
+                            this.state.historical_show_declaration_backup = newState.last_show_declaration;
+                        }
+                        this.state = newState;
+                    });
+
+                    this.socket.on('role_promoted', (data) => {
+                        if (data.username === this.username) {
+                            this.role = 'admin';
+                            this.errorMessage = "Administrative authorization validated. Privileges upgraded.";
+                        }
+                    });
+
+                    this.socket.on('error', (data) => {
+                        this.errorMessage = data.message;
+                    });
+                },
+
+                triggerShuffle() {
+                    this.shuffling = true;
+                    this.socket.emit('shuffle_deck', { username: this.username });
+                    setTimeout(() => { this.shuffling = false; }, 800);
+                },
+
+                isMyTurn() {
+                    return this.state.status === 'ACTIVE' && this.state.current_turn === this.username;
+                },
+
+                toggleCardSelection(idx) {
+                    if (this.selectedCards.includes(idx)) {
+                        this.selectedCards = this.selectedCards.filter(i => i !== idx);
+                    } else {
+                        this.selectedCards.push(idx);
+                    }
+                },
+
+                togglePickDiscardSelection() {
+                    if (this.selectedDiscardCardRaw) {
+                        this.selectedDiscardCardRaw = null;
+                        this.selectedPickCard = null;
+                    } else {
+                        let targetCard = null;
+                        if (this.state.last_turn_dropped_cards && this.state.last_turn_dropped_cards.length > 0) {
+                            targetCard = this.state.last_turn_dropped_cards[0];
+                        } else if (this.state.discard_pile && this.state.discard_pile.length > 0) {
+                            targetCard = this.state.discard_pile[this.state.discard_pile.length - 1];
+                        }
+                        if (targetCard) {
+                            this.selectedDiscardCardRaw = targetCard;
+                            this.selectedPickCard = targetCard;
+                        }
+                    }
+                },
+
+                discardSelection() {
+                    this.socket.emit('discard_cards', {
+                        username: this.username,
+                        indices: this.selectedCards,
+                        picked_discard: this.selectedPickCard
+                    });
+                    this.selectedCards = [];
+                    this.selectedDiscardCardRaw = null;
+                    this.selectedPickCard = null;
+                },
+
+                getCardColor(card) {
+                    if (!card) return 'text-slate-900';
+                    if (card.is_joker) return 'text-indigo-600';
+                    return (card.suit === 'H' || card.suit === 'D') ? 'text-rose-600' : 'text-slate-900';
+                },
+
+                getSuitIcon(card) {
+                    if (!card) return '';
+                    if (card.is_joker) return '🃏';
+                    const icons = { 'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠' };
+                    return icons[card.suit] || '';
+                },
+
+                isActingJokerValue(card) {
+                    return this.state.acting_joker && card && !card.is_joker && (card.value === this.state.acting_joker.value);
+                },
+
+                getMyPhoto() {
+                    if (this.state.user_photos && this.state.user_photos[this.username]) {
+                        return this.state.user_photos[this.username];
+                    }
+                    return 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80';
+                },
+
+                uploadProfilePhoto(event, user) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.socket.emit('update_profile_photo', { username: user, photo_url: e.target.result });
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                },
+
+                isDeclaringPlayerWinner() {
+                    if (!this.state.last_show_declaration) return false;
+                    const declUser = this.state.last_show_declaration.username;
+                    const winsObj = this.state.wins || {};
+                    const lastWinnerBacker = this.state.historical_winner_backup;
+                    if (lastWinnerBacker) return lastWinnerBacker === declUser;
+                    return (winsObj[declUser] || 0) > 0;
+                },
+
+                getReversedHistory() {
+                    if (!this.state.history) return [];
+                    return [...this.state.history].reverse().map(item => {
+                        let msg = item.message || '';
+                        const metadata = item.metadata || {};
+                        if (msg.toLowerCase().includes('show')) {
+                            const finalHand = metadata.final_hand;
+                            if (finalHand && finalHand.length > 0) {
+                                const serializedHand = finalHand.map(c => {
+                                    const suitSymbol = c.is_joker ? '🃏' : (c.suit === 'H' ? '♥' : c.suit === 'D' ? '♦' : c.suit === 'C' ? '♣' : '♠');
+                                    const colorClass = (c.suit === 'H' || c.suit === 'D') ? 'text-rose-600' : 'text-slate-900';
+                                    return `<span class="${colorClass} font-black">[${c.value}${suitSymbol}]</span>`;
+                                }).join(', ');
+                                msg = msg.replace(/show.*/gi, `show layout. Hand: ${serializedHand}`);
+                            }
+                        }
+                        return {
+                            time: item.timestamp || new Date().toLocaleTimeString(),
+                            message: msg
+                        };
+                    });
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+        .scrollbar-none::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-none {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</body>
+</html>

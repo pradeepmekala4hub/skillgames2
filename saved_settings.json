@@ -1,0 +1,15 @@
+{
+    "custom_emotions": {
+        "siri": "\ud83d\udc7e",
+        "pradeep": "\ud83d\udd25"
+    },
+    "custom_video_reactions": {
+        "admin": {
+            "WOW": "https://youtu.be/H-V1Jn6tycI?si=jsLAM5dBtG-yKQ_L"
+        },
+        "siri": {
+            "Wht": "https://youtube.com/shorts/8Cv_WFWnD-I?si=pbZqIus7lw2yq5PE"
+        }
+    },
+    "last_match_starter": "admin"
+}
