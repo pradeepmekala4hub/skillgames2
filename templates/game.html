@@ -182,7 +182,7 @@
                                 
                                 <template x-if="state.last_turn_dropped_cards && state.last_turn_dropped_cards.length > 0">
                                     <template x-for="(card, index) in state.last_turn_dropped_cards" :key="index">
-                                        <button @click="if(state.current_turn === username) { togglePickDiscardSelection(); }"
+                                        <button @click="if(state.current_turn === username) { togglePickDiscardSelection(card); }"
                                                 class="w-20 h-24 border rounded-lg shadow-sm flex flex-col items-center justify-between p-1 bg-white font-mono text-xs transition-transform duration-150 transform hover:scale-105 active:scale-95 cursor-pointer"
                                                 :class="[(card.suit === 'H' || card.suit === 'D') ? 'text-rose-600 border-rose-200' : 'text-slate-900 border-slate-300',
                                                          (selectedDiscardCardRaw && selectedDiscardCardRaw.value === card.value && selectedDiscardCardRaw.suit === card.suit) ? 'ring-2 ring-amber-500 border-amber-500 scale-105' : '']">
@@ -195,7 +195,7 @@
                     
                                 <template x-if="(!state.last_turn_dropped_cards || state.last_turn_dropped_cards.length === 0) && state.discard_pile && state.discard_pile.length > 0">
                                     <div x-data="{ topCard: state.discard_pile[state.discard_pile.length - 1] }">
-                                        <button @click="if(state.current_turn === username) { togglePickDiscardSelection(); }"
+                                        <button @click="if(state.current_turn === username) { togglePickDiscardSelection(topCard); }"
                                                 class="w-11 h-16 border rounded-lg shadow-sm flex flex-col items-center justify-between p-1 bg-white font-mono text-xs transition-transform duration-150 transform hover:scale-105 active:scale-95 cursor-pointer"
                                                 :class="[(topCard.suit === 'H' || topCard.suit === 'D') ? 'text-rose-600 border-rose-200' : 'text-slate-900 border-slate-300',
                                                          (selectedDiscardCardRaw && selectedDiscardCardRaw.value === topCard.value && selectedDiscardCardRaw.suit === topCard.suit) ? 'ring-2 ring-amber-500 border-amber-500 scale-105' : '']">
@@ -576,17 +576,12 @@
                     }
                 },
 
-                togglePickDiscardSelection() {
-                    if (this.selectedDiscardCardRaw) {
+                togglePickDiscardSelection(targetCard) {
+                    // Check if the clicked card is already selected
+                    if (this.selectedDiscardCardRaw && this.selectedDiscardCardRaw.value === targetCard.value && this.selectedDiscardCardRaw.suit === targetCard.suit) {
                         this.selectedDiscardCardRaw = null;
                         this.selectedPickCard = null;
                     } else {
-                        let targetCard = null;
-                        if (this.state.last_turn_dropped_cards && this.state.last_turn_dropped_cards.length > 0) {
-                            targetCard = this.state.last_turn_dropped_cards[0];
-                        } else if (this.state.discard_pile && this.state.discard_pile.length > 0) {
-                            targetCard = this.state.discard_pile[this.state.discard_pile.length - 1];
-                        }
                         if (targetCard) {
                             this.selectedDiscardCardRaw = targetCard;
                             this.selectedPickCard = targetCard;
