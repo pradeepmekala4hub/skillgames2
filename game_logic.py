@@ -43,7 +43,8 @@ class SkillGameEngine:
             self.log_event(f"Player {username} joined the table matrix.")
 
     def shuffle_deck(self, triggered_by=None):
-        """Builds and randomizes standard 52-card decks with natural jokers included."""
+        """Builds and randomizes standard 52-card decks with natural jokers included.
+        Dynamically adjusts deck counts to ensure a resilient stock pile."""
         suits = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades
         values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
         
@@ -67,20 +68,17 @@ class SkillGameEngine:
         self.log_event(f"Decks successfully shuffled by {operator} using {decks_needed}-deck shoe format. Ready to deal.")
 
     def start_game(self):
-        if not self.players:
-            return False, "No active players registered at the table matrix."
-        
-        num_players = len(self.players)
-        minimum_safety_threshold = (num_players * 5) + 2 + (num_players * 8)
-        
-        if not self.deck or len(self.deck) < minimum_safety_threshold:
-            self.shuffle_deck()
-
-        self.hands = {}
+        if len(self.players) < 2:
+            return False, "Not enough players in the lobby matrix."
+            
+        # Clear out transient state caches from previous match rounds
+        self.deck = []
         self.discard_pile = []
+        self.hands = {}
         self.last_turn_dropped_cards = []
         self.last_show_declaration = None
-        
+        self.drawn_this_turn = False
+
         # --- ROUND-ROBIN TURN INITIALIZATION ROTATOR ---
         if self.last_match_starter is None or self.last_match_starter not in self.players:
             # First match or starter left? Default to the first player in the active index list
@@ -126,9 +124,10 @@ class SkillGameEngine:
         
         player_hand = self.hands.get(username, [])
         
-        sorted_indices = sorted(list(set(indices)), reverse=True)
+        # 1. Gather dropped cards in normal ascending index order so they preserve sequence alignment
+        natural_indices = sorted(list(set(indices)))
         dropped_cards = []
-        for idx in sorted_indices:
+        for idx in natural_indices:
             if 0 <= idx < len(player_hand):
                 dropped_cards.append(player_hand[idx])
 
@@ -157,6 +156,8 @@ class SkillGameEngine:
             else:
                 return False, "The undealt stock deck stack has been fully depleted."
 
+        # 2. Pop elements from the hand using reverse descending indices to avoid shifting boundaries
+        sorted_indices = sorted(list(set(indices)), reverse=True)
         for idx in sorted_indices:
             if 0 <= idx < len(player_hand):
                 player_hand.pop(idx)
@@ -232,6 +233,7 @@ class SkillGameEngine:
         if self.status != "ACTIVE":
             return False, "No active match operational framework running to terminate."
 
+        # User modified code; Preserve it.
         player_scores_of_match = {}
         challenger = username
 

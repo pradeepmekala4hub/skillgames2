@@ -1,7 +1,9 @@
 {
     "custom_emotions": {
         "siri": "\ud83d\udc7e",
-        "pradeep": "\ud83d\udd25"
+        "pradeep": "\ud83d\udd25",
+        "Karthik": "\ud83e\udd21",
+        "admin": "\ud83d\udc7e"
     },
     "custom_video_reactions": {
         "admin": {
@@ -11,5 +13,5 @@
             "Wht": "https://youtube.com/shorts/8Cv_WFWnD-I?si=pbZqIus7lw2yq5PE"
         }
     },
-    "last_match_starter": "admin"
+    "last_match_starter": "pradeep"
 }
